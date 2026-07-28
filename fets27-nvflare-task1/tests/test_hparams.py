@@ -79,6 +79,7 @@ def test_train_args_change_only_allowed_hparams():
 
     assert "--cohort glioma" in train_args
     assert "--out_channels 3" in train_args
-    assert "--batch_size 1" in train_args
+    assert "--batch_size 2" in train_args
+    assert "--roi_size 128 128 128" in train_args
     assert "--weight_decay" in train_args
     assert "--unknown" not in train_args

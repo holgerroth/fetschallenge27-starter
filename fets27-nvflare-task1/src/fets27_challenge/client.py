@@ -150,9 +150,12 @@ def main():
         len(valid_loader),
         args.dataset_base_dir,
     )
+    train_iterator = iter(train_loader)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     LOGGER.info("[%s] using device=%s", client_name, device)
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
     model = create_model_for_cohort(args.cohort).to(device)
     optimizer = optim.Adam(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
@@ -169,6 +172,8 @@ def main():
         criterion_prox = PTFedProxLoss(mu=args.fedproxloss_mu)
 
     while flare.is_running():
+        if train_iterator is None:
+            train_iterator = iter(train_loader)
         LOGGER.info("[%s] waiting for global model", client_name)
         receive_start = time.perf_counter()
         input_model = flare.receive()
@@ -239,16 +244,19 @@ def main():
 
         for epoch in range(args.aggregation_epochs):
             epoch_start = time.perf_counter()
+            if device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(device)
             model.train()
             running_loss = 0.0
-            for batch_index, batch_data in enumerate(train_loader, start=1):
-                inputs = batch_data["image"].to(device)
-                labels = batch_data["label"].to(device)
+            epoch_iterator = train_iterator if epoch == 0 else iter(train_loader)
+            for batch_index, batch_data in enumerate(epoch_iterator, start=1):
+                inputs = batch_data["image"].to(device, non_blocking=True)
+                labels = batch_data["label"].to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
                 if criterion_prox is not None:
                     loss += criterion_prox(model, model_global)
-                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
@@ -276,16 +284,25 @@ def main():
             avg_loss = running_loss / len(train_loader)
             global_step = input_model.current_round * max(total_steps, 1) + epoch
             summary_writer.add_scalar("train_loss", avg_loss, global_step)
+            gpu_memory = "n/a"
+            if device.type == "cuda":
+                gpu_memory = (
+                    f"allocated={torch.cuda.max_memory_allocated(device) / 2**20:.1f} MiB "
+                    f"reserved={torch.cuda.max_memory_reserved(device) / 2**20:.1f} MiB"
+                )
             LOGGER.info(
-                "[%s] round %s epoch %s/%s complete in %.1fs: avg_loss=%.6f",
+                "[%s] round %s epoch %s/%s complete in %.1fs: "
+                "avg_loss=%.6f gpu_peak_memory=%s",
                 client_name,
                 input_model.current_round,
                 epoch + 1,
                 args.aggregation_epochs,
                 time.perf_counter() - epoch_start,
                 avg_loss,
+                gpu_memory,
             )
 
+        train_iterator = None
         state_dict_start = time.perf_counter()
         params = model.cpu().state_dict()
         update_tensor_count, update_payload_bytes = _summarize_params(params)

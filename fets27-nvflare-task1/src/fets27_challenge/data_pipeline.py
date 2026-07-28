@@ -53,6 +53,10 @@ except ImportError:  # pragma: no cover - imported in tests without heavy deps
     Spacingd = None
 
 
+_CACHE_WORKERS = 1
+_DATA_LOADER_WORKERS = 16
+
+
 def require_runtime_dependencies():
     """Verify that PyTorch, MONAI, and other runtime dependencies are installed.
 
@@ -139,22 +143,36 @@ def build_dataloaders(
             data=train_list,
             transform=train_transform,
             cache_rate=cache_rate,
-            num_workers=1,
+            num_workers=_CACHE_WORKERS,
         )
         valid_dataset = CacheDataset(
             data=valid_list,
             transform=valid_transform,
             cache_rate=cache_rate,
-            num_workers=1,
+            num_workers=_CACHE_WORKERS,
         )
     else:
         train_dataset = Dataset(data=train_list, transform=train_transform)
         valid_dataset = Dataset(data=valid_list, transform=valid_transform)
 
+    loader_kwargs = {
+        "num_workers": _DATA_LOADER_WORKERS,
+        "pin_memory": torch.cuda.is_available(),
+        "persistent_workers": True,
+        "prefetch_factor": 4,
+    }
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=1
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        **loader_kwargs,
     )
-    valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=1)
+    valid_loader = DataLoader(
+        valid_dataset,
+        batch_size=1,
+        shuffle=False,
+        **loader_kwargs,
+    )
     inferer = SlidingWindowInferer(
         roi_size=infer_roi_size, sw_batch_size=1, overlap=0.5
     )
@@ -189,8 +207,8 @@ def evaluate_model(
         total_metric = 0.0
         count = 0
         for batch_data in valid_loader:
-            val_images = batch_data["image"].to(device)
-            val_labels = batch_data["label"].to(device)
+            val_images = batch_data["image"].to(device, non_blocking=True)
+            val_labels = batch_data["label"].to(device, non_blocking=True)
             val_outputs = inferer(val_images, model)
             val_outputs = post_transform(val_outputs)
             metric_tensor = valid_metric(y_pred=val_outputs, y=val_labels)
