@@ -2,9 +2,10 @@
 
 This repository is a simulator-first NVFLARE baseline for FeTS27 Task 1.
 
-Participants are expected to edit exactly one file:
+Participants are expected to edit exactly two files:
 
 - `participant/aggregator.py`
+- `participant/client.py`
 
 Everything else should be treated as organizer-controlled unless you are explicitly maintaining the runtime.
 
@@ -15,7 +16,7 @@ Everything else should be treated as organizer-controlled unless you are explici
 - Loads the participant-defined server aggregator
 - Applies locked per-site training hyperparameters
 - Evaluates the best global checkpoint with the public scorer
-- Packages a submission containing only the allowed participant file
+- Packages a submission containing only the allowed participant files
 
 ## Quick Start
 
@@ -163,7 +164,7 @@ Reference datalist examples are provided under `assets/sample_datalists/`.
 
 ## Participant Workflow
 
-1. Edit `participant/aggregator.py`
+1. Edit `participant/aggregator.py` and/or `participant/client.py`
 2. Validate the submission surface:
 
 ```bash
@@ -212,7 +213,7 @@ The evaluator does not rely on TensorBoard summaries. It reloads the selected ch
 Local public evaluation and official hidden evaluation use the same code path:
 
 - same participant file surface
-- same locked client training loop
+- same client training loop
 - same locked evaluator
 - same score aggregation rule
 
@@ -225,3 +226,28 @@ Reference implementations are available in `src/fets27_challenge/reference_aggre
 - weighted FedAvg baseline
 - coordinate-wise median
 - clipped mean
+
+## Client Customization
+
+`participant/client.py` is the NVFLARE client script executed at each site. It
+starts as an exact copy of the organizer's client training loop; keep the data
+loading, model setup, validation, and local-training sections unchanged, as
+they are the official challenge behavior and submissions are reviewed against
+them.
+
+You may otherwise customize this file freely:
+
+- Run observation code around the training pipeline: read `input_model`
+  (received via `flare.receive()`) and log or record anything you like between
+  the fixed validation/training calls.
+- Customize what is sent to the server: the `FLModel` passed to `flare.send()`
+  carries `params`, `metrics`, and `meta`. The baseline aggregator weights
+  updates by `meta["NUM_STEPS_CURRENT_ROUND"]` (falls back to `1.0` if absent),
+  so keep or adjust that key consistently with your aggregator.
+- Customize what is received from the server: the aggregator may return an
+  `FLModel` whose `meta` is delivered back to clients in the next round; read
+  it through `input_model.meta` in the next `flare.receive()`.
+
+The aggregator (`participant/aggregator.py`) is fully editable and sees every
+client update via `accept_model`, so client-to-server and server-to-client
+metadata need no organizer-side support.

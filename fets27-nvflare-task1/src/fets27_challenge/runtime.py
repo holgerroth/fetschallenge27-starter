@@ -7,7 +7,12 @@ import time
 from pathlib import Path
 
 from .cohort_registry import get_cohort_spec
-from .config import DEFAULT_KEY_METRIC, DEFAULT_SAVE_FILENAME, PARTICIPANT_HPARAM_FILE
+from .config import (
+    DEFAULT_KEY_METRIC,
+    DEFAULT_SAVE_FILENAME,
+    PARTICIPANT_CLIENT_FILE,
+    PARTICIPANT_HPARAM_FILE,
+)
 from .evaluation import (
     CohortScore,
     discover_site_datalists,
@@ -25,6 +30,14 @@ from .participant_loader import load_participant_aggregator
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def resolve_participant_client_script(repo_root: Path) -> Path:
+    """Resolve the editable client script used by the NVFLARE recipe."""
+    client_script = repo_root / PARTICIPANT_CLIENT_FILE
+    if not client_script.is_file():
+        raise FileNotFoundError(f"Missing participant client script: {client_script}")
+    return client_script.resolve()
 
 
 def run_challenge(
@@ -175,9 +188,7 @@ def run_single_cohort(
         "min_clients": len(site_datalist_paths),
         "num_rounds": num_rounds,
         "model": create_model_for_cohort(cohort_name),
-        "train_script": str(
-            (repo_root / "src" / "fets27_challenge" / "client.py").resolve()
-        ),
+        "train_script": str(resolve_participant_client_script(repo_root)),
         "train_args": train_args,
         "aggregator": aggregator,
         "aggregator_data_kind": DataKind.WEIGHT_DIFF,

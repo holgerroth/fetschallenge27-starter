@@ -13,6 +13,7 @@ from .config import (
     IGNORED_VALIDATION_PARTS,
     MANIFEST_FILE,
     PARTICIPANT_AGGREGATOR_FILE,
+    PARTICIPANT_CLIENT_FILE,
 )
 
 
@@ -109,7 +110,7 @@ def package_submission(repo_root: Path, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for relative_path in (PARTICIPANT_AGGREGATOR_FILE,):
+        for relative_path in (PARTICIPANT_AGGREGATOR_FILE, PARTICIPANT_CLIENT_FILE):
             archive.write(repo_root / relative_path, arcname=relative_path.as_posix())
     return output_path
 

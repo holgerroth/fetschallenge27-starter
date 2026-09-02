@@ -1,4 +1,13 @@
-"""Locked NVFLARE client training script."""
+"""Participant-editable NVFLARE client script.
+
+Participants may run observation code around the fixed training pipeline and
+customize what is exchanged with the server through ``flare.receive`` and
+``flare.send`` (e.g. ``input_model.meta`` and the ``meta``/``metrics`` of the
+sent ``FLModel``). The regions marked "FIXED ... DO NOT MODIFY" below are the
+official challenge behavior (data loading, model setup, validation, local
+training, update preparation); keep them unchanged. Submissions are reviewed
+against this baseline."""
+
 
 from __future__ import annotations
 
@@ -127,6 +136,11 @@ def main():
         args.cache_dataset,
     )
 
+    # ==================================================================
+    # FIXED DATA PIPELINE — DO NOT MODIFY
+    # Dataloaders, transforms, and evaluation setup are the locked
+    # challenge configuration. Keep this block unchanged.
+    # ==================================================================
     loader_start = time.perf_counter()
     train_loader, valid_loader, inferer, post_transform, valid_metric = (
         build_dataloaders(
@@ -152,6 +166,11 @@ def main():
     )
     train_iterator = iter(train_loader)
 
+    # ==================================================================
+    # FIXED TRAINING SETUP — DO NOT MODIFY
+    # Device selection and the model/optimizer/loss objects are part of
+    # the official challenge behavior. Keep this block unchanged.
+    # ==================================================================
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     LOGGER.info("[%s] using device=%s", client_name, device)
     if device.type == "cuda":
@@ -190,6 +209,12 @@ def main():
             receive_elapsed,
             input_model.params_type,
         )
+        # ==============================================================
+        # FIXED VALIDATION — DO NOT MODIFY
+        # Loading the received global model and evaluating it are the
+        # official challenge behavior. Read-only observation and logging
+        # code may be inserted above this banner.
+        # ==============================================================
         load_start = time.perf_counter()
         model.load_state_dict(input_model.params, strict=True)
         model.to(device)
@@ -242,6 +267,12 @@ def main():
             log_interval,
         )
 
+        # ==============================================================
+        # FIXED LOCAL TRAINING LOOP — DO NOT MODIFY
+        # Forward pass, loss calculation, gradients, and optimizer steps
+        # are the official training behavior. Read-only observation and
+        # logging may be added around this loop.
+        # ==============================================================
         for epoch in range(args.aggregation_epochs):
             epoch_start = time.perf_counter()
             if device.type == "cuda":
@@ -302,6 +333,10 @@ def main():
                 gpu_memory,
             )
 
+        # ==============================================================
+        # FIXED UPDATE PREPARATION — DO NOT MODIFY
+        # The sent parameters must remain the trained model's state_dict.
+        # ==============================================================
         train_iterator = None
         state_dict_start = time.perf_counter()
         params = model.cpu().state_dict()
@@ -317,6 +352,15 @@ def main():
             time.perf_counter() - state_dict_start,
             time.perf_counter() - round_start,
         )
+        # ==============================================================
+        # SEND BLOCK — CUSTOMIZABLE
+        # You may extend the meta/metrics of the FLModel passed to
+        # flare.send (e.g. your own telemetry keys) and read the server
+        # reply from input_model.meta in the next flare.receive. Keep
+        # params as the trained state_dict above; if you rely on the
+        # baseline aggregator weighting, keep
+        # meta["NUM_STEPS_CURRENT_ROUND"] consistent with your aggregator.
+        # ==============================================================
         output_model = flare.FLModel(
             params=params,
             metrics={"val_dice": global_metric},
