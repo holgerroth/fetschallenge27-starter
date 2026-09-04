@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 import yaml
@@ -45,6 +46,25 @@ def test_invalid_key_rejected():
         validate_site_hparams(yaml.safe_load(path.read_text(encoding="utf-8")))
 
 
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("aggregation_epochs", 0, "positive integer"),
+        ("batch_size", 0, "positive integer"),
+        ("learning_rate", 0.0, "greater than zero"),
+        ("weight_decay", -1.0, "non-negative"),
+        ("fedproxloss_mu", float("nan"), "finite number"),
+        ("cache_dataset", 1.1, "between zero and one"),
+    ],
+)
+def test_invalid_hparam_value_rejected(key, value, message):
+    config = load_site_hparams(Path("participant/site_hparams.yaml"))
+    config["cohorts"]["glioma"]["defaults"][key] = value
+
+    with pytest.raises(ValueError, match=message):
+        validate_site_hparams(config)
+
+
 def test_build_per_site_config_merges_defaults_and_site_overrides():
     config = load_site_hparams(Path("participant/site_hparams.yaml"))
     cohort_spec = get_cohort_spec("glioma")
@@ -84,5 +104,34 @@ def test_train_args_change_only_allowed_hparams():
     assert "--roi_size 128 128 128" in train_args
     assert "--weight_decay" in train_args
     assert "--participant_client_file" in train_args
-    assert "participant/client.py" in train_args
+    participant_token = train_args.split()[
+        train_args.split().index("--participant_client_file") + 1
+    ]
+    assert Path(unquote(participant_token)) == Path("participant/client.py").resolve()
     assert "--unknown" not in train_args
+
+
+def test_train_args_encode_paths_with_spaces_as_single_tokens():
+    config = load_site_hparams(Path("participant/site_hparams.yaml"))
+    cohort_spec = get_cohort_spec("glioma")
+    dataset_path = Path(".test-artifacts/path with spaces/dataset")
+    datalist_path = Path(".test-artifacts/path with spaces/site-1.json")
+    participant_path = Path(".test-artifacts/path with spaces/client.py")
+
+    train_args = build_site_train_args(
+        cohort_spec,
+        dataset_base_dir=dataset_path,
+        datalist_json_path=datalist_path,
+        participant_client_file=participant_path,
+        hparams=config["cohorts"]["glioma"]["defaults"],
+    )
+    tokens = train_args.split()
+
+    for flag, expected in (
+        ("--dataset_base_dir", dataset_path),
+        ("--datalist_json_path", datalist_path),
+        ("--participant_client_file", participant_path),
+    ):
+        token = tokens[tokens.index(flag) + 1]
+        assert " " not in token
+        assert Path(unquote(token)) == expected.resolve()

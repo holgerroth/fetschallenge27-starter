@@ -44,3 +44,10 @@ DEFAULT_KEY_METRIC = "val_dice"
 DEFAULT_SAVE_FILENAME = "best_FL_global_model.pt"
 DEFAULT_TRANSFER_TYPE = "DIFF"
 MANIFEST_FILE = Path("challenge_manifest.json")
+
+# NVFLARE gives these metadata keys transport-level meaning. Participant code
+# must not use them to override organizer-owned metrics or message headers.
+RESERVED_PARTICIPANT_META_KEYS = {
+    "initial_metrics",
+    "validate_type",
+}

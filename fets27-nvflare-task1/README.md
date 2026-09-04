@@ -281,13 +281,16 @@ The function must return an NVFLARE `FLModel`:
 
 - `params` must contain the full locally updated state dictionary. The locked
   runner rejects missing, extra, reshaped, or retyped parameters. NVFLARE
-  applies the configured `DIFF` transfer after `local_train()` returns.
-- `meta` may contain serializable information for the participant aggregator,
-  such as update statistics or algorithm state. The baseline reports
-  `NUM_STEPS_CURRENT_ROUND`; the locked runner supplies the configured default
-  when that key is omitted.
-- `metrics` may contain participant metrics. The locked runner always computes
-  and sets the official `val_dice` itself.
+  applies the configured `DIFF` transfer after `local_train()` returns. The
+  runner accepts equivalent torch or NumPy dtypes and copies all returned
+  parameters into detached CPU tensors before NVFLARE computes the difference.
+- `meta` may contain string-keyed, NVFLARE-serializable information for the
+  participant aggregator, such as update statistics or algorithm state. The
+  transport-reserved keys `initial_metrics` and `validate_type` are rejected.
+  The baseline reports a positive, finite `NUM_STEPS_CURRENT_ROUND`; the locked
+  runner supplies the configured default when that key is omitted.
+- `metrics` may contain string-keyed, NVFLARE-serializable participant metrics.
+  The locked runner always computes and sets the official `val_dice` itself.
 
 The organizer-owned runner retains control of `flare.init()`,
 `flare.receive()`, official validation, `flare.send()`, and the overall client

@@ -5,8 +5,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from conftest import make_test_dir
+
 from fets27_challenge.submission import (
     compute_locked_manifest,
     package_submission,
@@ -62,3 +62,12 @@ def test_validate_submission_rejects_hparam_changes():
 
     with pytest.raises(ValueError, match="Modified locked files"):
         validate_submission_state(repo_root)
+
+
+def test_validate_submission_ignores_generated_package_metadata():
+    repo_root = _make_repo(make_test_dir("submission-package-metadata"))
+    egg_info = repo_root / "src" / "fets27_nvflare_task1.egg-info"
+    egg_info.mkdir(parents=True)
+    (egg_info / "PKG-INFO").write_text("generated\n", encoding="utf-8")
+
+    validate_submission_state(repo_root)

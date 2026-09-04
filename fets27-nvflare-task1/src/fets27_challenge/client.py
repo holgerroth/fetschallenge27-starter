@@ -6,6 +6,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
+from urllib.parse import unquote
 
 from fets27_challenge.data_pipeline import (
     build_dataloaders,
@@ -15,12 +16,37 @@ from fets27_challenge.data_pipeline import (
 )
 from fets27_challenge.local_training import (
     load_participant_local_train,
+    normalize_local_train_params,
     parameter_spec,
     validate_local_train_result,
 )
 from fets27_challenge.models import create_model_for_cohort
 
 LOGGER = logging.getLogger(__name__)
+
+
+class _PreloadedDataLoader:
+    """Proxy a loader while preserving one iterator preloaded before each round."""
+
+    def __init__(self, loader):
+        self._loader = loader
+        self._preloaded_iterator = None
+
+    def preload(self) -> None:
+        self._preloaded_iterator = iter(self._loader)
+
+    def __iter__(self):
+        if self._preloaded_iterator is not None:
+            iterator = self._preloaded_iterator
+            self._preloaded_iterator = None
+            return iterator
+        return iter(self._loader)
+
+    def __len__(self):
+        return len(self._loader)
+
+    def __getattr__(self, name):
+        return getattr(self._loader, name)
 
 
 def _value_nbytes(value) -> int:
@@ -50,7 +76,11 @@ def parse_args():
     """Parse command-line arguments for the organizer-owned client runner."""
     parser = argparse.ArgumentParser(description="FeTS27 Task 1 client runner.")
     parser.add_argument("--cohort", required=True)
-    parser.add_argument("--participant_client_file", type=Path, required=True)
+    parser.add_argument(
+        "--participant_client_file",
+        type=lambda value: Path(unquote(value)),
+        required=True,
+    )
     parser.add_argument("--aggregation_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=1)
@@ -77,6 +107,8 @@ def main():
 
     torch = get_torch_module()
     args = parse_args()
+    args.dataset_base_dir = unquote(args.dataset_base_dir)
+    args.datalist_json_path = unquote(args.datalist_json_path)
 
     flare.init()
     system_info = flare.system_info()
@@ -107,6 +139,9 @@ def main():
             infer_roi_size=tuple(args.infer_roi_size),
         )
     )
+    if len(train_loader) == 0:
+        raise ValueError("Training data loader is empty.")
+    train_loader = _PreloadedDataLoader(train_loader)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -116,6 +151,7 @@ def main():
     participant_state = {}
 
     while flare.is_running():
+        train_loader.preload()
         LOGGER.info("[%s] waiting for global model", client_name)
         receive_start = time.perf_counter()
         input_model = flare.receive()
@@ -164,6 +200,7 @@ def main():
             client_name=client_name,
         )
         validate_local_train_result(output_model, expected_spec)
+        normalize_local_train_params(output_model, torch)
 
         output_model.metrics = dict(output_model.metrics or {})
         output_model.metrics["val_dice"] = global_metric

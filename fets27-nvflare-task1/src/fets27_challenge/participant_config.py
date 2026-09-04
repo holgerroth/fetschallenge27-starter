@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
+from numbers import Real
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 
@@ -83,6 +86,24 @@ def _validate_hparam_mapping(mapping: dict, context: str):
     if invalid_keys:
         raise ValueError(f"{context} contains unsupported keys: {invalid_keys}")
 
+    for key, value in mapping.items():
+        value_context = f"{context}.{key}"
+        if key in {"aggregation_epochs", "batch_size"}:
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{value_context} must be a positive integer.")
+            continue
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise ValueError(f"{value_context} must be a finite number.")
+        numeric_value = float(value)
+        if not math.isfinite(numeric_value):
+            raise ValueError(f"{value_context} must be a finite number.")
+        if key == "learning_rate" and numeric_value <= 0:
+            raise ValueError(f"{value_context} must be greater than zero.")
+        if key in {"weight_decay", "fedproxloss_mu"} and numeric_value < 0:
+            raise ValueError(f"{value_context} must be non-negative.")
+        if key == "cache_dataset" and not 0 <= numeric_value <= 1:
+            raise ValueError(f"{value_context} must be between zero and one.")
+
 
 def resolve_site_hparams(config: dict, cohort_name: str, site_name: str) -> dict:
     """Resolve site-specific hyperparameters by merging defaults with site overrides.
@@ -127,9 +148,9 @@ def build_site_train_args(
         "--cohort",
         cohort_spec.name,
         "--dataset_base_dir",
-        _quote(dataset_base_dir),
+        _encode_path_arg(dataset_base_dir),
         "--datalist_json_path",
-        _quote(datalist_json_path),
+        _encode_path_arg(datalist_json_path),
         "--label_transform",
         cohort_spec.label_transform,
         "--in_channels",
@@ -145,7 +166,7 @@ def build_site_train_args(
         args.extend(
             [
                 "--participant_client_file",
-                _quote(participant_client_file.resolve()),
+                _encode_path_arg(participant_client_file.resolve()),
             ]
         )
     for key in ALLOWED_HPARAM_KEYS:
@@ -188,16 +209,13 @@ def build_per_site_config(
     return per_site_config
 
 
-def _quote(path_value: Path) -> str:
-    """Wrap a path string in quotes if it contains spaces.
+def _encode_path_arg(path_value: Path) -> str:
+    """Encode a path as one token for NVFLARE's whitespace-split arguments.
 
     Args:
         path_value: The Path object.
 
     Returns:
-        The quoted or unquoted path string.
+        The URL-encoded path string.
     """
-    text = str(path_value)
-    if " " in text:
-        return f'"{text}"'
-    return text
+    return quote(str(path_value), safe="/:\\")

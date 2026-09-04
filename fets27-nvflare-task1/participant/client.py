@@ -84,8 +84,10 @@ def local_train(
             parameter.requires_grad = False
 
     steps_per_epoch = len(train_loader)
+    if steps_per_epoch == 0:
+        raise ValueError("Training data loader is empty.")
     total_steps = steps_per_epoch * aggregation_epochs
-    log_interval = max(1, min(50, steps_per_epoch // 10 or 1))
+    log_interval = max(1, min(50, steps_per_epoch // 10))
     last_avg_loss = 0.0
     LOGGER.info(
         "[%s] round %s starting participant local_train: epochs=%s "
@@ -129,8 +131,6 @@ def local_train(
                     running_loss / batch_index,
                 )
 
-        if steps_per_epoch == 0:
-            raise ValueError("Training data loader is empty.")
         last_avg_loss = running_loss / steps_per_epoch
         summary_writer.add_scalar(
             "train_loss",
@@ -147,9 +147,7 @@ def local_train(
             last_avg_loss,
         )
 
-    params = {
-        key: value.detach().cpu().clone() for key, value in model.state_dict().items()
-    }
+    params = {key: value.detach() for key, value in model.state_dict().items()}
     return FLModel(
         params=params,
         metrics={"train_loss": last_avg_loss},

@@ -172,4 +172,6 @@ def _should_skip_dir(root_path: Path, dir_name: str) -> bool:
         return True
     if dir_name.startswith("pytest-cache-files"):
         return True
+    if dir_name.endswith((".egg-info", ".dist-info")):
+        return True
     return False
