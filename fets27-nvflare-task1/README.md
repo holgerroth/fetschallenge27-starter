@@ -2,20 +2,49 @@
 
 This repository is a simulator-first NVFLARE baseline for FeTS27 Task 1.
 
-Participants are expected to edit exactly one file:
+Participants are expected to edit exactly two files:
 
 - `participant/aggregator.py`
+- `participant/client.py`, which exposes `local_train()`
 
 Everything else should be treated as organizer-controlled unless you are explicitly maintaining the runtime.
+
+## Challenge Tracks
+
+The challenge is planned as two independent open tracks focused on the best
+federated task performance:
+
+1. **Open segmentation:** participants may customize both local training and
+   server aggregation. This is the only track implemented in this repository.
+2. **Open classification:** participants will have the same customization
+   surface for a future classification task. Classification data, models,
+   training, and evaluation are not implemented yet.
+
+The previously considered aggregation-only track has been removed because it
+would duplicate a constrained subset of the open tracks. Organizers will keep
+the dataset, splits, official evaluation, initial checkpoint, and federated
+lifecycle fixed for each task so submissions remain comparable.
+
+Each track is intended to combine normalized task performance with
+communication efficiency:
+
+```text
+communication_efficiency = min(1, baseline_bytes / measured_bytes)
+ranking_score = 0.95 * task_performance_score + 0.05 * communication_efficiency
+```
+
+This repository does not yet implement scoring-grade communication accounting
+or the combined ranking score. That work is tracked in
+[issue #3](https://github.com/IUCompPath/fetschallenge27-starter/issues/3).
 
 ## What This Repo Does
 
 - Runs federated training for the `glioma` cohort with the NVFLARE simulator
 - Starts the server from a locked SegResNet baseline checkpoint
 - Loads the participant-defined server aggregator
-- Applies locked per-site training hyperparameters
+- Provides per-site default training hyperparameters to `local_train()`
 - Evaluates the best global checkpoint with the public scorer
-- Packages a submission containing only the allowed participant file
+- Packages a submission containing only the allowed participant files
 
 ## Quick Start
 
@@ -163,7 +192,7 @@ Reference datalist examples are provided under `assets/sample_datalists/`.
 
 ## Participant Workflow
 
-1. Edit `participant/aggregator.py`
+1. Edit `participant/aggregator.py` and/or `participant/client.py`
 2. Validate the submission surface:
 
 ```bash
@@ -202,17 +231,26 @@ The official flow uses the same locked evaluator and score calculation as the pu
 
 ## Scoring
 
+The currently implemented segmentation evaluation reports:
+
 - Per cohort: mean validation Dice across participating sites using the best global checkpoint
 - Overall public score: the `glioma` validation Dice
 
 The evaluator does not rely on TensorBoard summaries. It reloads the selected checkpoint and recomputes the score.
+
+The planned official ranking will combine a task-defined performance score with
+communication efficiency as described under [Challenge Tracks](#challenge-tracks).
+The classification performance metric will be defined with that task. Until
+[issue #3](https://github.com/IUCompPath/fetschallenge27-starter/issues/3) is
+implemented, the current Dice results are task-performance outputs only and no
+communication-aware ranking score is produced.
 
 ## Public vs Hidden Evaluation
 
 Local public evaluation and official hidden evaluation use the same code path:
 
 - same participant file surface
-- same locked client training loop
+- same organizer-owned client lifecycle and evaluator
 - same locked evaluator
 - same score aggregation rule
 
@@ -225,3 +263,47 @@ Reference implementations are available in `src/fets27_challenge/reference_aggre
 - weighted FedAvg baseline
 - coordinate-wise median
 - clipped mean
+
+## Local Training Customization
+
+`participant/client.py` exposes one function, `local_train()`. The locked
+client runner builds the model and data loaders, receives each global model,
+computes the official validation metric, calls `local_train()`, validates its
+result, and sends that result through NVFLARE.
+
+`local_train()` receives the organizer-provided model and training loader plus
+the current round, default training hyperparameters, persistent per-client
+`state`, and metadata returned by the server in the previous round. Participants
+may replace the baseline optimizer, loss, local schedule, regularization, and
+other local optimization behavior inside this function.
+
+The function must return an NVFLARE `FLModel`:
+
+- `params` must contain the full locally updated state dictionary. The locked
+  runner rejects missing, extra, reshaped, or retyped parameters. NVFLARE
+  applies the configured `DIFF` transfer after `local_train()` returns. The
+  runner accepts equivalent torch or NumPy dtypes and copies all returned
+  parameters into detached CPU tensors before NVFLARE computes the difference.
+- `meta` may contain string-keyed, NVFLARE-serializable information for the
+  participant aggregator, such as update statistics or algorithm state. The
+  transport-reserved keys `initial_metrics` and `validate_type` are rejected.
+  The baseline reports a positive, finite `NUM_STEPS_CURRENT_ROUND`; the locked
+  runner supplies the configured default when that key is omitted.
+- `metrics` may contain string-keyed, NVFLARE-serializable participant metrics.
+  The locked runner always computes and sets the official `val_dice` itself.
+
+The organizer-owned runner retains control of `flare.init()`,
+`flare.receive()`, official validation, `flare.send()`, and the overall client
+lifecycle. The participant aggregator remains fully editable and receives the
+returned `FLModel` through `accept_model()`. Metadata returned by
+`aggregate_model()` is passed to `local_train()` as `server_meta` in the next
+round.
+
+The `approx_payload` log messages in the client runner and baseline aggregator
+are non-authoritative diagnostics based only on raw tensor storage. They omit
+serialization, metadata, transport behavior, and cumulative directional totals,
+so they must not be used for official communication accounting or ranking.
+
+This branch is an exploratory interface. Final challenge validation still
+needs explicit resource limits, metadata size/type checks, and isolation of
+participant code from other clients' data and side channels.

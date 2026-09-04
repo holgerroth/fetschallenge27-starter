@@ -1,11 +1,12 @@
-"""Locked NVFLARE client training script."""
+"""Organizer-owned NVFLARE client runner."""
 
 from __future__ import annotations
 
 import argparse
-import copy
 import logging
 import time
+from pathlib import Path
+from urllib.parse import unquote
 
 from fets27_challenge.data_pipeline import (
     build_dataloaders,
@@ -13,21 +14,42 @@ from fets27_challenge.data_pipeline import (
     get_torch_module,
     require_runtime_dependencies,
 )
+from fets27_challenge.local_training import (
+    load_participant_local_train,
+    normalize_local_train_params,
+    parameter_spec,
+    validate_local_train_result,
+)
 from fets27_challenge.models import create_model_for_cohort
-
 
 LOGGER = logging.getLogger(__name__)
 
 
+class _PreloadedDataLoader:
+    """Proxy a loader while preserving one iterator preloaded before each round."""
+
+    def __init__(self, loader):
+        self._loader = loader
+        self._preloaded_iterator = None
+
+    def preload(self) -> None:
+        self._preloaded_iterator = iter(self._loader)
+
+    def __iter__(self):
+        if self._preloaded_iterator is not None:
+            iterator = self._preloaded_iterator
+            self._preloaded_iterator = None
+            return iterator
+        return iter(self._loader)
+
+    def __len__(self):
+        return len(self._loader)
+
+    def __getattr__(self, name):
+        return getattr(self._loader, name)
+
+
 def _value_nbytes(value) -> int:
-    """Calculate the memory footprint of a tensor or numpy array in bytes.
-
-    Args:
-        value: The array or tensor object.
-
-    Returns:
-        The number of bytes.
-    """
     if hasattr(value, "numel") and hasattr(value, "element_size"):
         return int(value.numel() * value.element_size())
     if hasattr(value, "nbytes"):
@@ -36,29 +58,12 @@ def _value_nbytes(value) -> int:
 
 
 def _summarize_params(params) -> tuple[int, int]:
-    """Summarize a parameters dictionary in terms of count and size in bytes.
-
-    Args:
-        params: Parameters dictionary.
-
-    Returns:
-        A tuple containing (total parameter count, total size in bytes).
-    """
     if not params:
         return 0, 0
-    total_bytes = sum(_value_nbytes(value) for value in params.values())
-    return len(params), total_bytes
+    return len(params), sum(_value_nbytes(value) for value in params.values())
 
 
 def _format_bytes(num_bytes: int) -> str:
-    """Format a byte count into a human-readable string.
-
-    Args:
-        num_bytes: Number of bytes.
-
-    Returns:
-        A formatted string (e.g. '1.5 MiB').
-    """
     value = float(num_bytes)
     for unit in ("B", "KiB", "MiB", "GiB"):
         if value < 1024.0 or unit == "GiB":
@@ -68,13 +73,14 @@ def _format_bytes(num_bytes: int) -> str:
 
 
 def parse_args():
-    """Parse command line arguments for the client training run.
-
-    Returns:
-        The parsed Namespace object.
-    """
-    parser = argparse.ArgumentParser(description="FeTS27 Task 1 locked client script.")
+    """Parse command-line arguments for the organizer-owned client runner."""
+    parser = argparse.ArgumentParser(description="FeTS27 Task 1 client runner.")
     parser.add_argument("--cohort", required=True)
+    parser.add_argument(
+        "--participant_client_file",
+        type=lambda value: Path(unquote(value)),
+        required=True,
+    )
     parser.add_argument("--aggregation_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=1)
@@ -92,22 +98,17 @@ def parse_args():
 
 
 def main():
-    """Initialize the NVFLARE client, run validation and local training iterations."""
+    """Run the locked client lifecycle around participant-defined local training."""
     require_runtime_dependencies()
 
     import nvflare.client as flare
-    from monai.losses import DiceLoss
+    from nvflare.apis.fl_constant import FLMetaKey
     from nvflare.client.tracking import SummaryWriter
 
-    try:  # pragma: no cover - runtime path
-        from nvflare.app_opt.pt.fedproxloss import PTFedProxLoss
-    except ImportError:  # pragma: no cover - depends on NVFLARE extras
-        PTFedProxLoss = None
-
     torch = get_torch_module()
-    import torch.optim as optim
-
     args = parse_args()
+    args.dataset_base_dir = unquote(args.dataset_base_dir)
+    args.datalist_json_path = unquote(args.datalist_json_path)
 
     flare.init()
     system_info = flare.system_info()
@@ -115,19 +116,18 @@ def main():
     client_name = (
         system_info.get("site_name") or system_info.get("client_name") or "client"
     )
+    local_train = load_participant_local_train(args.participant_client_file.resolve())
+
     LOGGER.info(
-        "[%s] starting client script: cohort=%s datalist=%s batch_size=%s "
-        "aggregation_epochs=%s lr=%s cache_dataset=%s",
+        "[%s] starting client runner: cohort=%s datalist=%s batch_size=%s "
+        "participant_client=%s",
         client_name,
         args.cohort,
         args.datalist_json_path,
         args.batch_size,
-        args.aggregation_epochs,
-        args.learning_rate,
-        args.cache_dataset,
+        args.participant_client_file,
     )
 
-    loader_start = time.perf_counter()
     train_loader, valid_loader, inferer, post_transform, valid_metric = (
         build_dataloaders(
             dataset_base_dir=args.dataset_base_dir,
@@ -139,80 +139,42 @@ def main():
             infer_roi_size=tuple(args.infer_roi_size),
         )
     )
-    LOGGER.info(
-        "[%s] dataloaders ready in %.1fs: train_cases=%s train_batches=%s "
-        "valid_cases=%s valid_batches=%s dataset_base_dir=%s",
-        client_name,
-        time.perf_counter() - loader_start,
-        len(train_loader.dataset),
-        len(train_loader),
-        len(valid_loader.dataset),
-        len(valid_loader),
-        args.dataset_base_dir,
-    )
-    train_iterator = iter(train_loader)
+    if len(train_loader) == 0:
+        raise ValueError("Training data loader is empty.")
+    train_loader = _PreloadedDataLoader(train_loader)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    LOGGER.info("[%s] using device=%s", client_name, device)
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
     model = create_model_for_cohort(args.cohort).to(device)
-    optimizer = optim.Adam(
-        model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
-    )
-    criterion = DiceLoss(
-        smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True
-    )
-    criterion_prox = None
-    if args.fedproxloss_mu > 0:
-        if PTFedProxLoss is None:
-            raise ImportError(
-                "FedProx support is unavailable in the installed NVFLARE package."
-            )
-        criterion_prox = PTFedProxLoss(mu=args.fedproxloss_mu)
+    expected_spec = parameter_spec(model.state_dict())
+    participant_state = {}
 
     while flare.is_running():
-        if train_iterator is None:
-            train_iterator = iter(train_loader)
+        train_loader.preload()
         LOGGER.info("[%s] waiting for global model", client_name)
         receive_start = time.perf_counter()
         input_model = flare.receive()
-        receive_elapsed = time.perf_counter() - receive_start
-        round_start = time.perf_counter()
         tensor_count, payload_bytes = _summarize_params(input_model.params)
         LOGGER.info(
             "[%s] round %s received global model: tensors=%s approx_payload=%s "
-            "receive_wait_or_transfer=%.1fs params_type=%s",
+            "(non-authoritative diagnostic; raw tensor bytes only) "
+            "receive_wait_or_transfer=%.1fs",
             client_name,
             input_model.current_round,
             tensor_count,
             _format_bytes(payload_bytes),
-            receive_elapsed,
-            input_model.params_type,
-        )
-        load_start = time.perf_counter()
-        model.load_state_dict(input_model.params, strict=True)
-        model.to(device)
-        LOGGER.info(
-            "[%s] round %s global model loaded onto %s in %.1fs",
-            client_name,
-            input_model.current_round,
-            device,
-            time.perf_counter() - load_start,
+            time.perf_counter() - receive_start,
         )
 
+        model.load_state_dict(input_model.params, strict=True)
+        model.to(device)
         valid_start = time.perf_counter()
-        LOGGER.info(
-            "[%s] round %s starting validation: batches=%s",
-            client_name,
-            input_model.current_round,
-            len(valid_loader),
-        )
         global_metric = evaluate_model(
             model, valid_loader, inferer, post_transform, valid_metric, device
         )
         LOGGER.info(
-            "[%s] round %s validation complete in %.1fs: val_dice=%.6f",
+            "[%s] round %s official validation complete in %.1fs: val_dice=%.6f",
             client_name,
             input_model.current_round,
             time.perf_counter() - valid_start,
@@ -222,119 +184,48 @@ def main():
             "val_metric_global_model", global_metric, input_model.current_round
         )
 
-        model_global = None
-        if criterion_prox is not None:
-            model_global = copy.deepcopy(model)
-            for parameter in model_global.parameters():
-                parameter.requires_grad = False
+        train_start = time.perf_counter()
+        output_model = local_train(
+            model=model,
+            train_loader=train_loader,
+            device=device,
+            current_round=input_model.current_round,
+            aggregation_epochs=args.aggregation_epochs,
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+            fedproxloss_mu=args.fedproxloss_mu,
+            server_meta=dict(input_model.meta or {}),
+            state=participant_state,
+            summary_writer=summary_writer,
+            client_name=client_name,
+        )
+        validate_local_train_result(output_model, expected_spec)
+        normalize_local_train_params(output_model, torch)
 
-        steps_per_epoch = len(train_loader)
-        total_steps = steps_per_epoch * args.aggregation_epochs
-        log_interval = max(1, min(50, steps_per_epoch // 10 or 1))
-        LOGGER.info(
-            "[%s] round %s starting local training: epochs=%s steps_per_epoch=%s "
-            "total_steps=%s log_interval=%s",
-            client_name,
-            input_model.current_round,
-            args.aggregation_epochs,
-            steps_per_epoch,
-            total_steps,
-            log_interval,
+        output_model.metrics = dict(output_model.metrics or {})
+        output_model.metrics["val_dice"] = global_metric
+        output_model.meta = dict(output_model.meta or {})
+        output_model.meta.setdefault(
+            FLMetaKey.NUM_STEPS_CURRENT_ROUND,
+            len(train_loader) * args.aggregation_epochs,
         )
 
-        for epoch in range(args.aggregation_epochs):
-            epoch_start = time.perf_counter()
-            if device.type == "cuda":
-                torch.cuda.reset_peak_memory_stats(device)
-            model.train()
-            running_loss = 0.0
-            epoch_iterator = train_iterator if epoch == 0 else iter(train_loader)
-            for batch_index, batch_data in enumerate(epoch_iterator, start=1):
-                inputs = batch_data["image"].to(device, non_blocking=True)
-                labels = batch_data["label"].to(device, non_blocking=True)
-                optimizer.zero_grad(set_to_none=True)
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                if criterion_prox is not None:
-                    loss += criterion_prox(model, model_global)
-                loss.backward()
-                optimizer.step()
-                running_loss += loss.item()
-                should_log_step = (
-                    batch_index == 1
-                    or batch_index == steps_per_epoch
-                    or batch_index % log_interval == 0
-                )
-                if should_log_step:
-                    LOGGER.info(
-                        "[%s] round %s epoch %s/%s step %s/%s "
-                        "avg_loss=%.6f elapsed=%.1fs",
-                        client_name,
-                        input_model.current_round,
-                        epoch + 1,
-                        args.aggregation_epochs,
-                        batch_index,
-                        steps_per_epoch,
-                        running_loss / batch_index,
-                        time.perf_counter() - epoch_start,
-                    )
-
-            if len(train_loader) == 0:
-                raise ValueError("Training data loader is empty.")
-            avg_loss = running_loss / len(train_loader)
-            global_step = input_model.current_round * max(total_steps, 1) + epoch
-            summary_writer.add_scalar("train_loss", avg_loss, global_step)
-            gpu_memory = "n/a"
-            if device.type == "cuda":
-                gpu_memory = (
-                    f"allocated={torch.cuda.max_memory_allocated(device) / 2**20:.1f} MiB "
-                    f"reserved={torch.cuda.max_memory_reserved(device) / 2**20:.1f} MiB"
-                )
-            LOGGER.info(
-                "[%s] round %s epoch %s/%s complete in %.1fs: "
-                "avg_loss=%.6f gpu_peak_memory=%s",
-                client_name,
-                input_model.current_round,
-                epoch + 1,
-                args.aggregation_epochs,
-                time.perf_counter() - epoch_start,
-                avg_loss,
-                gpu_memory,
-            )
-
-        train_iterator = None
-        state_dict_start = time.perf_counter()
-        params = model.cpu().state_dict()
-        update_tensor_count, update_payload_bytes = _summarize_params(params)
+        update_tensor_count, update_payload_bytes = _summarize_params(
+            output_model.params
+        )
         LOGGER.info(
-            "[%s] round %s prepared update: tensors=%s approx_payload=%s "
-            "total_steps=%s preparation=%.1fs round_elapsed=%.1fs",
+            "[%s] round %s local_train returned in %.1fs: tensors=%s "
+            "approx_payload=%s (non-authoritative diagnostic; raw tensor bytes only) "
+            "metrics=%s meta_keys=%s",
             client_name,
             input_model.current_round,
+            time.perf_counter() - train_start,
             update_tensor_count,
             _format_bytes(update_payload_bytes),
-            total_steps,
-            time.perf_counter() - state_dict_start,
-            time.perf_counter() - round_start,
-        )
-        output_model = flare.FLModel(
-            params=params,
-            metrics={"val_dice": global_metric},
-            meta={"NUM_STEPS_CURRENT_ROUND": total_steps},
-        )
-        send_start = time.perf_counter()
-        LOGGER.info(
-            "[%s] round %s sending update to server",
-            client_name,
-            input_model.current_round,
+            sorted(output_model.metrics),
+            sorted(output_model.meta),
         )
         flare.send(output_model)
-        LOGGER.info(
-            "[%s] round %s update sent in %.1fs",
-            client_name,
-            input_model.current_round,
-            time.perf_counter() - send_start,
-        )
 
 
 if __name__ == "__main__":  # pragma: no cover - script entrypoint

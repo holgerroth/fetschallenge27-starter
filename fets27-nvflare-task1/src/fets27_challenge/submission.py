@@ -13,6 +13,7 @@ from .config import (
     IGNORED_VALIDATION_PARTS,
     MANIFEST_FILE,
     PARTICIPANT_AGGREGATOR_FILE,
+    PARTICIPANT_CLIENT_FILE,
 )
 
 
@@ -109,7 +110,7 @@ def package_submission(repo_root: Path, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for relative_path in (PARTICIPANT_AGGREGATOR_FILE,):
+        for relative_path in (PARTICIPANT_AGGREGATOR_FILE, PARTICIPANT_CLIENT_FILE):
             archive.write(repo_root / relative_path, arcname=relative_path.as_posix())
     return output_path
 
@@ -170,5 +171,7 @@ def _should_skip_dir(root_path: Path, dir_name: str) -> bool:
     if dir_name.startswith("tmp"):
         return True
     if dir_name.startswith("pytest-cache-files"):
+        return True
+    if dir_name.endswith((".egg-info", ".dist-info")):
         return True
     return False

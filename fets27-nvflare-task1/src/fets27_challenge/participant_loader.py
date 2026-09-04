@@ -9,6 +9,26 @@ from pathlib import Path
 from .config import PARTICIPANT_AGGREGATOR_FILE
 
 
+def load_participant_module(module_path: Path, module_name: str):
+    """Load a participant module and avoid retaining a failed import."""
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load participant module from {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    previous_module = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        if previous_module is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = previous_module
+        raise
+    return module
+
+
 def load_participant_aggregator(repo_root: Path):
     """Load the participant's custom aggregator from the repository.
 
@@ -28,13 +48,7 @@ def load_participant_aggregator(repo_root: Path):
         TypeError: If any of the required methods are missing or not callable.
     """
     module_path = repo_root / PARTICIPANT_AGGREGATOR_FILE
-    spec = importlib.util.spec_from_file_location("participant.aggregator", module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load participant aggregator from {module_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    module = load_participant_module(module_path, "participant.aggregator")
 
     if hasattr(module, "build_aggregator"):
         aggregator = module.build_aggregator()

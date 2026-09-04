@@ -66,6 +66,7 @@ class ParticipantAggregator(ModelAggregator):
         tensor_count, payload_bytes = _summarize_params(model.params)
         LOGGER.info(
             "[server] accepting client update: tensors=%s approx_payload=%s "
+            "(non-authoritative diagnostic; raw tensor bytes only) "
             "weight=%s params_type=%s metrics=%s meta_keys=%s",
             tensor_count,
             _format_bytes(payload_bytes),
@@ -118,6 +119,7 @@ class ParticipantAggregator(ModelAggregator):
         tensor_count, payload_bytes = _summarize_params(aggregated)
         LOGGER.info(
             "[server] aggregated %s client updates: tensors=%s approx_payload=%s "
+            "(non-authoritative diagnostic; raw tensor bytes only) "
             "total_weight=%.3f elapsed=%.1fs",
             self.accepted_updates,
             tensor_count,
