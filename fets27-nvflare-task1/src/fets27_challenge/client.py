@@ -122,6 +122,7 @@ def main():
         tensor_count, payload_bytes = _summarize_params(input_model.params)
         LOGGER.info(
             "[%s] round %s received global model: tensors=%s approx_payload=%s "
+            "(non-authoritative diagnostic; raw tensor bytes only) "
             "receive_wait_or_transfer=%.1fs",
             client_name,
             input_model.current_round,
@@ -177,7 +178,8 @@ def main():
         )
         LOGGER.info(
             "[%s] round %s local_train returned in %.1fs: tensors=%s "
-            "approx_payload=%s metrics=%s meta_keys=%s",
+            "approx_payload=%s (non-authoritative diagnostic; raw tensor bytes only) "
+            "metrics=%s meta_keys=%s",
             client_name,
             input_model.current_round,
             time.perf_counter() - train_start,

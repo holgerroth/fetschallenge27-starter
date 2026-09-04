@@ -9,6 +9,34 @@ Participants are expected to edit exactly two files:
 
 Everything else should be treated as organizer-controlled unless you are explicitly maintaining the runtime.
 
+## Challenge Tracks
+
+The challenge is planned as two independent open tracks focused on the best
+federated task performance:
+
+1. **Open segmentation:** participants may customize both local training and
+   server aggregation. This is the only track implemented in this repository.
+2. **Open classification:** participants will have the same customization
+   surface for a future classification task. Classification data, models,
+   training, and evaluation are not implemented yet.
+
+The previously considered aggregation-only track has been removed because it
+would duplicate a constrained subset of the open tracks. Organizers will keep
+the dataset, splits, official evaluation, initial checkpoint, and federated
+lifecycle fixed for each task so submissions remain comparable.
+
+Each track is intended to combine normalized task performance with
+communication efficiency:
+
+```text
+communication_efficiency = min(1, baseline_bytes / measured_bytes)
+ranking_score = 0.95 * task_performance_score + 0.05 * communication_efficiency
+```
+
+This repository does not yet implement scoring-grade communication accounting
+or the combined ranking score. That work is tracked in
+[issue #3](https://github.com/IUCompPath/fetschallenge27-starter/issues/3).
+
 ## What This Repo Does
 
 - Runs federated training for the `glioma` cohort with the NVFLARE simulator
@@ -203,10 +231,19 @@ The official flow uses the same locked evaluator and score calculation as the pu
 
 ## Scoring
 
+The currently implemented segmentation evaluation reports:
+
 - Per cohort: mean validation Dice across participating sites using the best global checkpoint
 - Overall public score: the `glioma` validation Dice
 
 The evaluator does not rely on TensorBoard summaries. It reloads the selected checkpoint and recomputes the score.
+
+The planned official ranking will combine a task-defined performance score with
+communication efficiency as described under [Challenge Tracks](#challenge-tracks).
+The classification performance metric will be defined with that task. Until
+[issue #3](https://github.com/IUCompPath/fetschallenge27-starter/issues/3) is
+implemented, the current Dice results are task-performance outputs only and no
+communication-aware ranking score is produced.
 
 ## Public vs Hidden Evaluation
 
@@ -258,6 +295,11 @@ lifecycle. The participant aggregator remains fully editable and receives the
 returned `FLModel` through `accept_model()`. Metadata returned by
 `aggregate_model()` is passed to `local_train()` as `server_meta` in the next
 round.
+
+The `approx_payload` log messages in the client runner and baseline aggregator
+are non-authoritative diagnostics based only on raw tensor storage. They omit
+serialization, metadata, transport behavior, and cumulative directional totals,
+so they must not be used for official communication accounting or ranking.
 
 This branch is an exploratory interface. Final challenge validation still
 needs explicit resource limits, metadata size/type checks, and isolation of
