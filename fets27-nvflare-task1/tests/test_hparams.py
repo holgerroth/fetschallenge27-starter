@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from conftest import make_test_dir
+
 from fets27_challenge.cohort_registry import get_cohort_spec
 from fets27_challenge.participant_config import (
     build_per_site_config,
@@ -71,6 +71,7 @@ def test_train_args_change_only_allowed_hparams():
         cohort_spec,
         dataset_base_dir=Path("D:/data/glioma/dataset"),
         datalist_json_path=Path("D:/data/glioma/datalist/site-2.json"),
+        participant_client_file=Path("participant/client.py"),
         hparams={
             **config["cohorts"]["glioma"]["defaults"],
             **config["cohorts"]["glioma"]["sites"]["site-2"],
@@ -82,4 +83,6 @@ def test_train_args_change_only_allowed_hparams():
     assert "--batch_size 2" in train_args
     assert "--roi_size 128 128 128" in train_args
     assert "--weight_decay" in train_args
+    assert "--participant_client_file" in train_args
+    assert "participant/client.py" in train_args
     assert "--unknown" not in train_args

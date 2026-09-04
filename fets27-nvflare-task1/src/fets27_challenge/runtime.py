@@ -10,6 +10,7 @@ from .cohort_registry import get_cohort_spec
 from .config import (
     DEFAULT_KEY_METRIC,
     DEFAULT_SAVE_FILENAME,
+    LOCKED_CLIENT_FILE,
     PARTICIPANT_CLIENT_FILE,
     PARTICIPANT_HPARAM_FILE,
 )
@@ -28,16 +29,17 @@ from .participant_config import (
 )
 from .participant_loader import load_participant_aggregator
 
-
 LOGGER = logging.getLogger(__name__)
 
 
-def resolve_participant_client_script(repo_root: Path) -> Path:
-    """Resolve the editable client script used by the NVFLARE recipe."""
-    client_script = repo_root / PARTICIPANT_CLIENT_FILE
-    if not client_script.is_file():
-        raise FileNotFoundError(f"Missing participant client script: {client_script}")
-    return client_script.resolve()
+def resolve_client_scripts(repo_root: Path) -> tuple[Path, Path]:
+    """Resolve the locked runner and participant local-training module."""
+    locked_client = repo_root / LOCKED_CLIENT_FILE
+    participant_client = repo_root / PARTICIPANT_CLIENT_FILE
+    for script in (locked_client, participant_client):
+        if not script.is_file():
+            raise FileNotFoundError(f"Missing client script: {script}")
+    return locked_client.resolve(), participant_client.resolve()
 
 
 def run_challenge(
@@ -131,16 +133,16 @@ def run_single_cohort(
         FileNotFoundError: If the datalist directories or site JSONs cannot be found.
     """
     from nvflare.apis.dxo import DataKind  # pragma: no cover - runtime dependency path
-    from nvflare.app_opt.pt.recipes.fedavg import (
+    from nvflare.app_opt.pt.recipes.fedavg import (  # pragma: no cover - runtime dependency path
         FedAvgRecipe,
-    )  # pragma: no cover - runtime dependency path
-    from nvflare.client.config import (
+    )
+    from nvflare.client.config import (  # pragma: no cover - runtime dependency path
         TransferType,
-    )  # pragma: no cover - runtime dependency path
-    from nvflare.recipe import (
+    )
+    from nvflare.recipe import (  # pragma: no cover - runtime dependency path
         SimEnv,
         add_experiment_tracking,
-    )  # pragma: no cover - runtime dependency path
+    )
 
     cohort_spec = get_cohort_spec(cohort_name)
     participant_config = load_site_hparams(repo_root / PARTICIPANT_HPARAM_FILE)
@@ -158,11 +160,13 @@ def run_single_cohort(
     )
 
     dataset_base_dir = cohort_spec.dataset_dir(data_root)
+    locked_client_file, participant_client_file = resolve_client_scripts(repo_root)
     per_site_config = build_per_site_config(
         participant_config,
         cohort_spec,
         dataset_base_dir=dataset_base_dir,
         site_datalist_paths=site_datalist_paths,
+        participant_client_file=participant_client_file,
     )
 
     first_site = next(iter(site_datalist_paths))
@@ -172,6 +176,7 @@ def run_single_cohort(
         dataset_base_dir=dataset_base_dir,
         datalist_json_path=site_datalist_paths[first_site],
         hparams=default_hparams,
+        participant_client_file=participant_client_file,
     )
 
     aggregator = load_participant_aggregator(repo_root)
@@ -188,7 +193,7 @@ def run_single_cohort(
         "min_clients": len(site_datalist_paths),
         "num_rounds": num_rounds,
         "model": create_model_for_cohort(cohort_name),
-        "train_script": str(resolve_participant_client_script(repo_root)),
+        "train_script": str(locked_client_file),
         "train_args": train_args,
         "aggregator": aggregator,
         "aggregator_data_kind": DataKind.WEIGHT_DIFF,

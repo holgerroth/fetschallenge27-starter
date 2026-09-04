@@ -5,7 +5,7 @@ This repository is a simulator-first NVFLARE baseline for FeTS27 Task 1.
 Participants are expected to edit exactly two files:
 
 - `participant/aggregator.py`
-- `participant/client.py`
+- `participant/client.py`, which exposes `local_train()`
 
 Everything else should be treated as organizer-controlled unless you are explicitly maintaining the runtime.
 
@@ -14,7 +14,7 @@ Everything else should be treated as organizer-controlled unless you are explici
 - Runs federated training for the `glioma` cohort with the NVFLARE simulator
 - Starts the server from a locked SegResNet baseline checkpoint
 - Loads the participant-defined server aggregator
-- Applies locked per-site training hyperparameters
+- Provides per-site default training hyperparameters to `local_train()`
 - Evaluates the best global checkpoint with the public scorer
 - Packages a submission containing only the allowed participant files
 
@@ -213,7 +213,7 @@ The evaluator does not rely on TensorBoard summaries. It reloads the selected ch
 Local public evaluation and official hidden evaluation use the same code path:
 
 - same participant file surface
-- same client training loop
+- same organizer-owned client lifecycle and evaluator
 - same locked evaluator
 - same score aggregation rule
 
@@ -227,27 +227,38 @@ Reference implementations are available in `src/fets27_challenge/reference_aggre
 - coordinate-wise median
 - clipped mean
 
-## Client Customization
+## Local Training Customization
 
-`participant/client.py` is the NVFLARE client script executed at each site. It
-starts as an exact copy of the organizer's client training loop; keep the data
-loading, model setup, validation, and local-training sections unchanged, as
-they are the official challenge behavior and submissions are reviewed against
-them.
+`participant/client.py` exposes one function, `local_train()`. The locked
+client runner builds the model and data loaders, receives each global model,
+computes the official validation metric, calls `local_train()`, validates its
+result, and sends that result through NVFLARE.
 
-You may otherwise customize this file freely:
+`local_train()` receives the organizer-provided model and training loader plus
+the current round, default training hyperparameters, persistent per-client
+`state`, and metadata returned by the server in the previous round. Participants
+may replace the baseline optimizer, loss, local schedule, regularization, and
+other local optimization behavior inside this function.
 
-- Run observation code around the training pipeline: read `input_model`
-  (received via `flare.receive()`) and log or record anything you like between
-  the fixed validation/training calls.
-- Customize what is sent to the server: the `FLModel` passed to `flare.send()`
-  carries `params`, `metrics`, and `meta`. The baseline aggregator weights
-  updates by `meta["NUM_STEPS_CURRENT_ROUND"]` (falls back to `1.0` if absent),
-  so keep or adjust that key consistently with your aggregator.
-- Customize what is received from the server: the aggregator may return an
-  `FLModel` whose `meta` is delivered back to clients in the next round; read
-  it through `input_model.meta` in the next `flare.receive()`.
+The function must return an NVFLARE `FLModel`:
 
-The aggregator (`participant/aggregator.py`) is fully editable and sees every
-client update via `accept_model`, so client-to-server and server-to-client
-metadata need no organizer-side support.
+- `params` must contain the full locally updated state dictionary. The locked
+  runner rejects missing, extra, reshaped, or retyped parameters. NVFLARE
+  applies the configured `DIFF` transfer after `local_train()` returns.
+- `meta` may contain serializable information for the participant aggregator,
+  such as update statistics or algorithm state. The baseline reports
+  `NUM_STEPS_CURRENT_ROUND`; the locked runner supplies the configured default
+  when that key is omitted.
+- `metrics` may contain participant metrics. The locked runner always computes
+  and sets the official `val_dice` itself.
+
+The organizer-owned runner retains control of `flare.init()`,
+`flare.receive()`, official validation, `flare.send()`, and the overall client
+lifecycle. The participant aggregator remains fully editable and receives the
+returned `FLModel` through `accept_model()`. Metadata returned by
+`aggregate_model()` is passed to `local_train()` as `server_meta` in the next
+round.
+
+This branch is an exploratory interface. Final challenge validation still
+needs explicit resource limits, metadata size/type checks, and isolation of
+participant code from other clients' data and side channels.
