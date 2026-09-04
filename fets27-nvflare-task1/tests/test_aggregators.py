@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 
 from fets27_challenge.compat import FLMetaKey, FLModel
 from fets27_challenge.participant_loader import load_participant_aggregator
@@ -15,7 +16,7 @@ from fets27_challenge.reference_aggregators import (
 def _model(values, weight):
     return FLModel(
         params={"w": np.asarray(values, dtype=np.float32)},
-        params_type="weights",
+        params_type="DIFF",
         meta={FLMetaKey.NUM_STEPS_CURRENT_ROUND: weight},
     )
 

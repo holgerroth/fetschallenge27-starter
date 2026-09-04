@@ -31,7 +31,7 @@
   "src/fets27_challenge/synthetic_data.py": "c8fe27a12a1d39ae6d1600708e34b22db96622c3571c558afb748590937e32b8",
   "src/fets27_challenge/training_dummy.py": "e071dfc39106bdfe86ee50f920cf9ff78a6320d9e27238f86031527d8b3b7dbe",
   "tests/conftest.py": "b5deee4c62c6c88740cfee513b41405ee4b20c591a41a6257892b74ccbe04146",
-  "tests/test_aggregators.py": "7da08c456efcb6dcc7667aa85f8ef5f3eeb6438902e0c81e0c96ff45243a9c2e",
+  "tests/test_aggregators.py": "d0af49284ece90cd43d54e3d2a006bbf37406dbafe2d0c2b7e40414838b8b7c4",
   "tests/test_client.py": "a04b2b8120e6a964810871be86ed6e3c8fb8e630ce08551090e0811989117f61",
   "tests/test_evaluation.py": "069ec5e94c58df14655aeeb256d2f749c41d90d7f432aee73466b1e045058e0c",
   "tests/test_hparams.py": "b937855cb85ac40c952657bb4c3c1c02b3a03bd4fb70c284e3c26b08ba486ad0",
