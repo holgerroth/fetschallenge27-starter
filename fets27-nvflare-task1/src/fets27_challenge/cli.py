@@ -6,7 +6,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from .config import COHORT_NAMES
+from .config import COHORT_NAMES, DEFAULT_DATA_LOADER_WORKERS
 from .runtime import run_challenge
 from .submission import package_submission, validate_submission_state, write_manifest
 from .synthetic_data import prepare_assets
@@ -19,6 +19,14 @@ def configure_logging():
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+
+def non_negative_int(value: str) -> int:
+    """Parse a command-line integer that must be zero or greater."""
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return parsed
 
 
 def main(argv: list[str] | None = None):
@@ -89,6 +97,12 @@ def main(argv: list[str] | None = None):
         run_parser.add_argument("--num-rounds", type=int, default=2)
         run_parser.add_argument("--threads", type=int, default=None)
         run_parser.add_argument("--gpu", type=str, default=None)
+        run_parser.add_argument(
+            "--data-loader-workers",
+            type=non_negative_int,
+            default=DEFAULT_DATA_LOADER_WORKERS,
+            help="Worker processes per client DataLoader (default: 2)",
+        )
 
     args = parser.parse_args(argv)
 
@@ -134,6 +148,7 @@ def main(argv: list[str] | None = None):
         num_rounds=args.num_rounds,
         threads=args.threads,
         gpu=args.gpu,
+        data_loader_workers=args.data_loader_workers,
     )
     print(f"JSON summary: {json_path}")
     print(f"CSV summary: {csv_path}")

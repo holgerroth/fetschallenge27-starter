@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "description": "Post-merge full baseline validation on two H100 GPUs",
+  "source": {
+    "repository": "IUCompPath/fetschallenge27-starter",
+    "base_commit": "d5b839c6682634ac0ccb6efef3701c62c88d1e45",
+    "validation_patch": "src/fets27_challenge/data_pipeline.py: data loader workers 16 to 2",
+    "validation_patch_sha256": "2656308e8045c75d4d52557ace1a65cd8d2e95a9805f159b26b3cf92ddac0486"
+  },
+  "dataset": {
+    "name": "FeTS2022 natural-institution split",
+    "partition_seed": 2027,
+    "site_count": 23,
+    "subject_count": 1251,
+    "training_count": 1123,
+    "validation_count": 128,
+    "partition_csv_sha256": "147e872fd100d16631520cde6210efb0f89a3a42ec330a2b6fd7d932f9fda3cb",
+    "datalist_bundle_sha256": "8a5ed23072869ca72f617151d8c8cd9cd91f971ef0afdce6f5613f3a0d2d1fa5"
+  },
+  "training": {
+    "rounds": 50,
+    "local_epochs": 2,
+    "batch_size": 2,
+    "learning_rate": 0.0001,
+    "initial_checkpoint_seed": 2027,
+    "initial_checkpoint_sha256": "462acc3c1dda9eedf43345fac86a7f69342bc7419f0c64da895c0e98274148f5",
+    "inference_roi": [128, 128, 128]
+  },
+  "runtime": {
+    "gpu_model": "NVIDIA H100",
+    "physical_gpu_ids": [2, 3],
+    "client_gpu_assignment": [2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2],
+    "data_loader_workers_per_loader": 2,
+    "python": "3.11.15",
+    "torch": "2.13.0+cu130",
+    "monai": "1.6.0",
+    "nvflare": "2.8.1"
+  },
+  "result": {
+    "status": "passed",
+    "overall_public_score": 0.8279239645432692,
+    "recomputed_site_macro_mean": 0.8279239645432691,
+    "historical_baseline_score": 0.8239186587560989,
+    "delta_vs_historical_baseline": 0.004005305787170288,
+    "completed_rounds": 50,
+    "updates_per_round": 23,
+    "final_checkpoint_sha256": "4cbce3c97c1578d3fb17687daf8b1bc2fff501b0eed9330dc2c1c4a7c7d2eefc"
+  }
+}

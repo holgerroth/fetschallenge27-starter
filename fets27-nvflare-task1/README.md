@@ -122,6 +122,7 @@ python -m fets27_challenge.cli run-local \
   --output-dir ./outputs/training_dummy \
   --num-rounds 1 \
   --threads 2 \
+  --data-loader-workers 2 \
   --gpu '[0],[1]'
 ```
 
@@ -130,6 +131,11 @@ Notes:
 - `--gpu '[0],[1]'` maps one simulator client to GPU 0 and the other to GPU 1.
 - If you want CPU-only execution, omit `--gpu`.
 - NVFLARE may force one thread per GPU group when multi-GPU simulation is used.
+- `--data-loader-workers` is the number of worker processes used by each
+  training and validation loader in every client. The safe simulator default is
+  2. Use 0 for synchronous loading or tune it upward for smaller deployments.
+  Resource use grows roughly with clients times loaders times workers, so large
+  site counts should not use workstation-scale worker settings blindly.
 
 ### 6. Inspect the results
 
@@ -224,10 +230,29 @@ Run the official entrypoint on the hidden data root:
 python -m fets27_challenge.cli run-official \
   --data-root /secure/fets27_hidden \
   --workspace ./workspace \
-  --output-dir ./outputs/official
+  --output-dir ./outputs/official \
+  --data-loader-workers 2
 ```
 
 The official flow uses the same locked evaluator and score calculation as the public local flow.
+
+### Reference H100 validation profile
+
+The merged open-training interface was validated end to end on the 23-site
+FeTS2022 natural-institution split using two H100 GPUs. The run completed 50
+rounds with 23 of 23 updates in every round and produced an
+`overall_public_score` of `0.8279239645432692`, compared with the like-for-like
+historical baseline of `0.8239186587560989`.
+
+The machine-readable profile in
+[`validation_profiles/h100_23_site_baseline.json`](validation_profiles/h100_23_site_baseline.json)
+records the dataset and checkpoint fingerprints, software versions, 50-round
+training settings, alternating GPU assignment, two workers per loader, and
+result hashes. The validation used organizer-controlled settings of two local
+epochs, seed 2027, and a 128 x 128 x 128 inference ROI. These are validation
+evidence, not new participant-editable settings. The profile also records the
+one-line worker-count patch needed for that run; this PR replaces that patch
+with the supported `--data-loader-workers` option.
 
 ## Scoring
 

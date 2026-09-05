@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from pathlib import Path
 
 import pytest
 
 from conftest import REPO_ROOT, make_test_dir
+from fets27_challenge import runtime
 from fets27_challenge.runtime import run_challenge
 from fets27_challenge.synthetic_data import prepare_assets
 
@@ -16,6 +18,49 @@ def _deps_available() -> bool:
 
 
 RUN_SMOKE = os.environ.get("FETS27_RUN_NVFLARE_SMOKE") == "1"
+
+
+def test_run_challenge_propagates_worker_override(monkeypatch):
+    recorded_workers = []
+
+    def fake_run_single_cohort(**kwargs):
+        recorded_workers.append(kwargs["data_loader_workers"])
+        return object()
+
+    monkeypatch.setattr(runtime, "run_single_cohort", fake_run_single_cohort)
+    monkeypatch.setattr(
+        runtime,
+        "write_summary",
+        lambda *_args, **_kwargs: (Path("summary.json"), Path("summary.csv")),
+    )
+
+    run_challenge(
+        repo_root=REPO_ROOT,
+        mode="local",
+        cohort_names=["glioma"],
+        data_root=Path("data"),
+        workspace_root=Path("workspace"),
+        output_dir=Path("outputs"),
+        num_rounds=1,
+        data_loader_workers=3,
+    )
+
+    assert recorded_workers == [3]
+
+
+@pytest.mark.parametrize("value", [-1, True, 1.5])
+def test_run_challenge_rejects_invalid_worker_count(value):
+    with pytest.raises(ValueError, match="non-negative integer"):
+        run_challenge(
+            repo_root=REPO_ROOT,
+            mode="local",
+            cohort_names=["glioma"],
+            data_root=Path("data"),
+            workspace_root=Path("workspace"),
+            output_dir=Path("outputs"),
+            num_rounds=1,
+            data_loader_workers=value,
+        )
 
 
 @pytest.mark.skipif(

@@ -82,6 +82,21 @@ def test_build_per_site_config_merges_defaults_and_site_overrides():
     assert "--aggregation_epochs 1" in per_site["site-1"]["train_args"]
     assert "--learning_rate 8e-05" in per_site["site-2"]["train_args"]
     assert "--label_transform brats_multi_channel" in per_site["site-1"]["train_args"]
+    assert "--data_loader_workers 2" in per_site["site-1"]["train_args"]
+
+
+def test_build_per_site_config_propagates_worker_override():
+    config = load_site_hparams(Path("participant/site_hparams.yaml"))
+    cohort_spec = get_cohort_spec("glioma")
+    per_site = build_per_site_config(
+        config,
+        cohort_spec,
+        dataset_base_dir=Path("D:/data/glioma/dataset"),
+        site_datalist_paths={"site-1": Path("D:/data/glioma/datalist/site-1.json")},
+        data_loader_workers=0,
+    )
+
+    assert "--data_loader_workers 0" in per_site["site-1"]["train_args"]
 
 
 def test_train_args_change_only_allowed_hparams():
