@@ -76,12 +76,8 @@ def run_challenge(
         - The path to the CSV summary file.
         - A list of CohortScore instances containing results for each cohort.
     """
-    if (
-        isinstance(data_loader_workers, bool)
-        or not isinstance(data_loader_workers, int)
-        or data_loader_workers < 0
-    ):
-        raise ValueError("data_loader_workers must be a non-negative integer.")
+    if data_loader_workers <= 0:
+        raise ValueError("data_loader_workers must be a positive integer.")
 
     LOGGER.info(
         "starting challenge run: mode=%s cohorts=%s data_root=%s workspace=%s "

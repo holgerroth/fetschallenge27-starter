@@ -21,14 +21,6 @@ def configure_logging():
     )
 
 
-def non_negative_int(value: str) -> int:
-    """Parse a command-line integer that must be zero or greater."""
-    parsed = int(value)
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("must be a non-negative integer")
-    return parsed
-
-
 def main(argv: list[str] | None = None):
     """FeTS27 Task 1 CLI entry point parser and runner.
 
@@ -99,7 +91,7 @@ def main(argv: list[str] | None = None):
         run_parser.add_argument("--gpu", type=str, default=None)
         run_parser.add_argument(
             "--data-loader-workers",
-            type=non_negative_int,
+            type=int,
             default=DEFAULT_DATA_LOADER_WORKERS,
             help="Worker processes per client DataLoader (default: 2)",
         )

@@ -124,12 +124,6 @@ def build_dataloaders(
         A tuple of (train_loader, valid_loader, inferer, post_transform, valid_metric).
     """
     require_runtime_dependencies()
-    if (
-        isinstance(data_loader_workers, bool)
-        or not isinstance(data_loader_workers, int)
-        or data_loader_workers < 0
-    ):
-        raise ValueError("data_loader_workers must be a non-negative integer.")
 
     train_list = load_decathlon_datalist(
         data_list_file_path=datalist_json_path,
@@ -167,9 +161,9 @@ def build_dataloaders(
     loader_kwargs = {
         "num_workers": data_loader_workers,
         "pin_memory": torch.cuda.is_available(),
+        "persistent_workers": True,
+        "prefetch_factor": 4,
     }
-    if data_loader_workers > 0:
-        loader_kwargs.update({"persistent_workers": True, "prefetch_factor": 4})
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
